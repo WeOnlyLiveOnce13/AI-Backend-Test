@@ -1,0 +1,4 @@
+fastapi>=0.110
+uvicorn[standard]>=0.29
+pydantic>=2.6
+# Add your own: a Postgres driver (psycopg / asyncpg / SQLAlchemy) and a Redis client.
