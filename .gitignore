@@ -19,3 +19,7 @@ tasks/task1_algorithmic/output/*
 .quarto/
 _site/
 _freeze/
+
+# Local input data
+data/*
+!data/.gitkeep
