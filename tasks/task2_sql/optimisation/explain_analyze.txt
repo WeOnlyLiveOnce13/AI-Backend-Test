@@ -1,0 +1,38 @@
+-- Representative EXPLAIN ANALYZE output (reference run; your numbers may vary).
+-- Captured with: EXPLAIN (ANALYZE, BUFFERS) <slow_query.sql>
+
+ Sort  (cost=98213.44..98214.19 rows=300 width=33)
+       (actual time=4123.881..4123.907 rows=300 loops=1)
+   Sort Key: ((SubPlan 2)) DESC, ((SubPlan 1)) DESC
+   Sort Method: quicksort  Memory: 47kB
+   ->  Seq Scan on cameras c  (cost=0.00..98201.12 rows=300 width=33)
+                              (actual time=14.882..4123.142 rows=300 loops=1)
+         SubPlan 1
+           ->  Aggregate  (cost=163.21..163.22 rows=1 width=8)
+                          (actual time=6.503..6.503 rows=1 loops=300)
+                 ->  Seq Scan on alarms a  (cost=0.00..163.00 rows=84 width=0)
+                                           (actual time=0.041..6.489 rows=61 loops=300)
+                       Filter: ((camera_id = c.camera_id)
+                                AND ((alarm_ts)::date >= '2026-06-07'::date))
+                       Rows Removed by Filter: 54939
+         SubPlan 2
+           ->  Aggregate  (cost=163.43..163.44 rows=1 width=8)
+                          (actual time=7.214..7.214 rows=1 loops=300)
+                 ->  Hash Join  (cost=...)  (actual time=... rows=11 loops=300)
+                       Hash Cond: (d.alarm_id = a2.alarm_id)
+                       ->  Seq Scan on dispositions d
+                             Filter: (outcome = 'false_alarm'::text)
+                       ->  Hash
+                             ->  Seq Scan on alarms a2
+                                   Filter: ((camera_id = c.camera_id)
+                                            AND ((alarm_ts)::date >= '2026-06-07'::date))
+                                   Rows Removed by Filter: 54939
+ Planning Time: 0.412 ms
+ Execution Time: 4124.602 ms
+
+-- Reading the plan:
+--   * The two SubPlans run once PER camera row (loops=300): the alarms table is
+--     scanned ~300 times over.
+--   * Each scan is a Seq Scan with "Rows Removed by Filter: 54939" -- the
+--     (alarm_ts)::date cast prevents any index on alarm_ts from being used.
+--   * Execution time is dominated by these repeated sequential scans.
