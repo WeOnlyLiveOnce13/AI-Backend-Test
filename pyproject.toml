@@ -1,0 +1,31 @@
+[project]
+name = "deepalert-takehome"
+version = "0.1.0"
+requires-python = ">=3.11"
+dependencies = [
+    "asyncpg>=0.31.0",
+    "fastapi>=0.139.0",
+    "pydantic>=2.13.4",
+    "pydantic-settings>=2.14.2",
+    "redis>=8.0.1",
+    "uvicorn[standard]>=0.50.2",
+]
+
+[dependency-groups]
+dev = [
+    "httpx>=0.28.1",
+    "pytest>=9.1.1",
+    "pytest-asyncio>=1.4.0",
+    "ruff>=0.15.20",
+]
+
+[tool.ruff]
+line-length = 88
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests", "tasks"]

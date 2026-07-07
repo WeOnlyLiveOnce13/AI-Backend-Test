@@ -1,0 +1,21 @@
+# macOS
+.DS_Store
+
+# Local environment
+.env
+.venv/
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+
+# Task runtime outputs
+tasks/task1_algorithmic/output/*
+!tasks/task1_algorithmic/output/.gitkeep
+
+# Quarto output/cache
+.quarto/
+_site/
+_freeze/
