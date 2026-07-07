@@ -23,3 +23,5 @@ _freeze/
 # Local input data
 data/*
 !data/.gitkeep
+
+tasks/task1_algorithmic/data/*.csv
