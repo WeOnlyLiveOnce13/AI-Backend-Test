@@ -1,0 +1,20 @@
+project:
+  type: website
+  output-dir: docs
+  render:
+    - report/index.qmd
+
+website:
+  title: "AI Backend Engineer Challenge"
+  navbar:
+    left:
+      - href: report/index.qmd
+        text: Report
+
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    theme: cosmo
+    code-fold: true
+    code-tools: true

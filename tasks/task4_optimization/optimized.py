@@ -9,7 +9,6 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
 
-
 DEFAULT_CSV = Path("data/alarms.csv")
 
 

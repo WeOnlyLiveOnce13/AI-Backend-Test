@@ -1,0 +1,315 @@
+---
+title: "AI Backend Engineer Challenge"
+subtitle: "SQL optimization, FastAPI ingestion, event grouping, and Python optimization"
+author: "Dan A. Tshisungu"
+format:
+  html:
+    toc: true
+    code-fold: true
+---
+
+## Overview
+
+This repository contains a backend-focused Challenge submission covering four areas:
+
+- alarm event grouping,
+- SQL querying and optimization,
+- a FastAPI ingestion service backed by Postgres and Redis,
+- Python performance optimization.
+
+The implementation uses one root `uv` project and Docker Compose for infrastructure services.
+
+The overall context is an alarm-monitoring backend system. The data represents alarms produced by cameras, plus relational operational data around sites, 
+customers, operator dispositions, and model predictions. 
+
+The Challenge asks how to transform noisy alarm data into useful events, query it efficiently, expose it through an API, and optimize Python code that processes it.
+
+Alarm event grouping means taking many low-level raw alarms and converting them into higher-level events. 
+A real-world incident can trigger several alarms from the same camera within a short period, so grouping helps reduce noise and produce more meaningful records for operators,
+analytics, and downstream systems.
+
+The dataset includes a local CSV file with about 50,000 raw alarm rows. Each row includes an alarm id, timestamp, camera id, and alarm type. 
+The data intentionally includes realistic edge cases such as out-of-order rows, duplicate timestamps, long idle gaps, and timezone-aware timestamps. 
+Task 2 also provides a PostgreSQL schema with sites, cameras, alarms, dispositions, and model predictions.
+
+| Task | Focus | Main challenge |
+| --- | --- | --- |
+| Task 1 | Alarm event grouping | Turn raw alarms into logical grouped events and flag anomalous cameras. |
+| Task 2 | SQL querying and optimization | Write correct PostgreSQL queries, reason about schema design, and optimize a slow query. |
+| Task 3 | FastAPI ingestion service | Persist alarms to Postgres and cache recent camera events in Redis. |
+| Task 4 | Python optimization | Make slow Python code fast while preserving identical output. |
+
+## Project Structure
+
+```text
+tasks/
+  task1_algorithmic/
+  task2_sql/
+  task3_python/
+  task4_optimization/
+
+data/
+  alarms.csv  # ignored by Git
+```
+
+## Task 1: Alarm Event Grouping
+
+Task 1 groups raw alarms into logical events using a session/chaining window.
+
+What was given:
+
+- a CSV file of raw alarms,
+- unordered timestamps,
+- duplicate timestamps,
+- timezone-aware timestamp handling,
+- long idle gaps for some cameras,
+- a requirement to define and justify anomaly detection.
+
+The implementation:
+
+- normalizes timestamps to UTC,
+- sorts by camera, timestamp, and alarm ID,
+- groups alarms where the gap to the previous alarm is at most `T` seconds,
+- writes event output to CSV,
+- flags anomalous cameras using recent 7-day event rates versus the prior 30 days.
+
+The grouping uses a session/chaining window. This means an alarm joins the current event if it is from the same camera and happens within `T` seconds of the previous alarm. 
+The comparison is against the previous alarm, not only the first alarm in the event, so an event can continue as long as alarms keep arriving close together.
+
+For anomaly detection, I compare each camera's recent 7-day event rate against its prior 30-day event rate. The windows are anchored to the maximum timestamp in the dataset 
+rather than the real-world current date.
+
+Before this task, the dataset only contained raw alarm rows. The output produces grouped events and anomalous cameras, which are more useful for operational review.
+
+Local result:
+
+```text
+alarms read       : 50513
+events written    : 22236
+anomalies written : 4
+max timestamp UTC : 2026-06-20T23:59:42.851902Z
+```
+
+*Task 1 trade-offs:*
+
+- Reading the full CSV into memory and sorting is simple and appropriate for about 50,000 rows.
+- The anomaly rule is intentionally explainable rather than statistically complex.
+- For a real streaming system, I would use per-camera state, event-time windows, and a clear late-arrival policy.
+
+*Task 1 with more time:*
+
+- Add unit tests for the timestamp, grouping, duplicate timestamp, and idle-gap edge cases.
+- Add a chart showing recent versus prior event rates for anomalous cameras.
+- Improve anomaly scoring using volume thresholds, seasonality, and confidence bands.
+
+## Task 2: SQL
+
+Task 2 includes:
+
+- top sites by alarm volume,
+- 7-day rolling false-alarm rates,
+- dispatch-time percentiles,
+- anti-join for cameras with predictions but no confirmed recent events,
+- schema design for disposition storage,
+- optimization of a deliberately slow query.
+
+What was given:
+
+- a PostgreSQL schema,
+- seed data for sites, cameras, alarms, dispositions, and model predictions,
+- several SQL questions,
+- a deliberately slow query with an `EXPLAIN ANALYZE` plan.
+
+The SQL answers are kept in separate `.sql` files for readability and maintainability. The queries use CTEs, window functions, filtered aggregates, percentiles, and anti-joins depending on the question.
+
+For dispatch percentiles, I explicitly handle negative dispatch durations. They are counted separately as invalid negative dispatch values and excluded from the percentile calculation.
+
+The Q6 optimization replaced correlated subqueries with one filtered aggregate.
+
+The original slow query repeatedly scanned alarms and dispositions per camera. The optimized version filters recent alarms once, joins dispositions once, groups by camera, and then joins the result back to the camera table.
+
+| Query | Execution time |
+| --- | ---: |
+| Provided slow query | 4124.602 ms |
+| Optimized query | 11.470 ms |
+
+Approximate speedup:
+
+```text
+359x
+```
+
+Before this task, the database only had schema, seed data, and prompt questions. The output now includes runnable SQL files, a schema-design proposal, and an optimized query with measured improvement.
+
+*Task 2 trade-offs:*
+
+- I prioritized clear SQL over overly compact SQL.
+- The Q6 improvement focuses first on query shape rather than immediately adding indexes.
+- For the schema-design question, I denormalize `camera_id` and `alarm_ts` onto disposition rows because the target lookup pattern is camera plus time window.
+
+*Task 2 with more time:*
+
+- Add saved query-result snapshots for easier review.
+- Benchmark additional indexes on larger synthetic data.
+- Enable `pg_stat_statements` for query latency monitoring.
+- Compare monthly versus weekly partitions for the disposition storage design.
+- Add a small script to run all SQL files and validate expected output shapes.
+
+## Task 3: FastAPI Ingestion Service
+
+The Task 3 service accepts alarm events and persists them to Postgres while caching recent events in Redis.
+
+What was given:
+
+- a requirement to build an alarm ingestion API,
+- Postgres persistence,
+- Redis caching for the latest `N` events per camera,
+- support for single ingest, bulk ingest, and recent-event lookup,
+- Docker support,
+- basic tests,
+- correct ordering even when events arrive out of order.
+
+*Architecture:*
+
+```text
+controllers -> services -> repositories/cache -> Postgres/Redis
+```
+
+*Key choices:*
+
+- Postgres is the source of truth.
+- Redis sorted sets store recent events per camera.
+- Sorted-set scores use event timestamps, so out-of-order ingestion still returns correct chronological results.
+- SQL lives in `.sql` files and is loaded by the repository layer.
+- Runtime configuration is injected through environment variables.
+
+The controller layer owns HTTP routing. The service layer owns workflow decisions such as cache fallback. The repository layer owns Postgres persistence. 
+The cache layer owns Redis sorted-set operations.
+
+For recent events, the service tries Redis first when the requested limit can be satisfied by the configured cache size. If Redis does not have enough events, 
+the service falls back to Postgres, returns the correct result, and refreshes the cache.
+
+Endpoints:
+
+```text
+GET  /health
+POST /alarms
+POST /alarms/bulk
+GET  /cameras/{camera_id}/recent?limit=K
+```
+
+Manual smoke test confirmed:
+
+- API container builds and starts,
+- health endpoint works,
+- single ingest works,
+- bulk ingest works,
+- recent events return in chronological order.
+
+Before this task, there was no running API service. The output is a runnable FastAPI app with Docker Compose support, Postgres persistence, Redis caching, validation, 
+and tests.
+
+*Task 3 trade-offs:*
+
+- The tests use a fake service so API behavior can be tested quickly without requiring Docker for every test run.
+- Startup schema creation is acceptable for the take-home, but migrations would be better for production.
+- `asyncpg` keeps the database layer explicit and lightweight, but an ORM could help if the domain model became larger.
+- Redis is treated as an acceleration layer, not the source of truth.
+
+*Task 3 with more time:*
+
+- Add Alembic migrations instead of startup schema creation.
+- Add Docker-backed integration tests against real Postgres and Redis.
+- Add structured logging and request IDs.
+- Add API request metrics for request count, error rate, and latency.
+- Add query latency monitoring around Postgres operations.
+- Track Redis cache hit and miss rates.
+- Add API versioning such as `/api/v1`.
+- Add authentication and rate limiting.
+- Add deployment configuration for a managed platform.
+
+## Task 4: Python Optimization
+
+Task 4 optimizes the provided `slow_code.py` while preserving output.
+
+What was given:
+
+- a correct but slow Python implementation,
+- a checksum used to verify correctness,
+- a `--limit` option because the slow implementation is expensive on the full file,
+- a requirement to keep output identical.
+
+The original implementation compares each alarm against every other alarm. It also repeatedly parses timestamps inside nested loops. That makes the runtime grow very quickly as the number of rows increases.
+
+The optimized implementation:
+
+- parses timestamps once,
+- groups rows by camera,
+- sorts timestamps per camera,
+- uses binary search to count prior timestamps in the window.
+
+This changes the shape of the work from repeated full scans to sorted per-camera lookups. Duplicate timestamps are handled correctly because the code counts only alarms that are strictly earlier.
+
+| Script | Rows | Checksum | Elapsed |
+| --- | ---: | ---: | ---: |
+| `slow_code.py` | 1,000 | 11 | 27.3 ms |
+| `optimized.py` | 1,000 | 11 | 0.6 ms |
+| `slow_code.py` | 4,000 | 351 | 446.3 ms |
+| `optimized.py` | 4,000 | 351 | 2.9 ms |
+| `slow_code.py` | 50,513 | 54,214 | 77,839.8 ms |
+| `optimized.py` | 50,513 | 54,214 | 48.0 ms |
+
+Approximate full-file speedup:
+
+```text
+1622x
+```
+
+Before this task, the full file was slow to process with the original implementation. The output is an optimized script that processes the full CSV quickly while matching the original checksum.
+
+*Task 4 trade-offs:*
+
+- The optimized solution stays in pure Python and uses only the standard library.
+- I avoided adding pandas, Polars, or another dependency because the algorithmic change is enough.
+- The solution is still easy to inspect and compare against the original implementation.
+
+*Task 4 with more time:*
+
+- Add a benchmark harness that runs multiple iterations.
+- Report median and p95 runtime instead of one timing.
+- Add generated edge-case tests comparing the optimized implementation against the slow implementation.
+- Add memory measurements for larger synthetic datasets.
+
+## Trade-Offs
+
+I kept the project intentionally small:
+
+- one root `uv` project,
+- Docker Compose for Postgres and Redis,
+- no heavy framework around the algorithmic tasks,
+- direct `asyncpg` instead of ORM complexity,
+- SQL files for maintainability where SQL matters.
+
+The main trade-off is that the project is built to be clean, runnable, and easy to review within take-home constraints. It avoids unnecessary infrastructure while still showing how the pieces would evolve toward production.
+
+## With More Time
+
+I would add:
+
+- Quarto charts generated from benchmark outputs,
+- Docker-backed integration tests for the FastAPI service,
+- Alembic migrations,
+- API request and query latency monitoring,
+- API versioning,
+- deployment configuration for a managed platform,
+- richer anomaly scoring for Task 1.
+
+Section-wise, I would improve the project as follows:
+
+| Area | With more time |
+| --- | --- |
+| Task 1 | Add stronger tests, charts for anomaly behavior, and more robust anomaly scoring. |
+| Task 2 | Add query-result snapshots, index benchmarks, `pg_stat_statements`, and larger-scale schema testing. |
+| Task 3 | Add migrations, real integration tests, authentication, rate limiting, observability, and deployment configuration. |
+| Task 4 | Add a proper benchmark harness, median/p95 timings, and generated correctness tests. |
+| Overall | Add GitHub Actions for tests, linting, Quarto rendering, and GitHub Pages publishing. |

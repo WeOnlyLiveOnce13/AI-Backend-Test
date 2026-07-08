@@ -25,3 +25,5 @@ data/*
 !data/.gitkeep
 
 tasks/task1_algorithmic/data/*.csv
+/.quarto/
+**/*.quarto_ipynb

@@ -31,6 +31,8 @@ The interval is inclusive at the lower bound and exclusive at the upper bound, m
 
 ```text
 0 < current_time - previous_time <= window
+```
+
 
 ## Complexity
 

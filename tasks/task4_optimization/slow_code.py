@@ -7,7 +7,8 @@ This script computes a simple per-alarm feature over the Task 1 dataset:
                           in time, within the preceding WINDOW seconds.
 
 The implementation below is **correct but slow**. Your job (see README.md) is to make it
-faster for large inputs without changing its output. It reads the alarms CSV from Task 1.
+faster for large inputs without changing its output. It reads the alarms CSV from
+Task 1.
 
 It prints three things you should preserve:
   * rows processed
